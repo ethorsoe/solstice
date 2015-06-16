@@ -1,0 +1,89 @@
+#ifndef _DEDUP_H
+#define _DEDUP_H
+
+#define CHECKSUMSIZE	4
+#define	BLOCKSIZE	4096
+#define MEBI (1024ULL*1024ULL)
+#define MIN_SUBVOL 257
+
+#define DEDUP_ZERO_CRC	0x98f94189
+
+#define DEDUP_SPECIAL_OFFSET_ZEROES (-1ULL)
+
+#include <assert.h>
+
+#ifdef DEDUP_DEBUG_REASONABLE
+# ifndef DEDUP_DEBUG_MAX_INODE
+#  define DEDUP_DEBUG_MAX_INODE 10*MEBI
+# endif
+# ifndef DEDUP_DEBUG_MAX_ROOT
+#  define DEDUP_DEBUG_MAX_ROOT MEBI
+# endif
+# ifndef DEDUP_DEBUG_MAX_LOGICAL
+#  define DEDUP_DEBUG_MAX_LOGICAL 1000ULL*MEBI*MEBI
+# endif
+# ifndef DEDUP_DEBUG_MAX_FILEOFFSET
+#  define DEDUP_DEBUG_MAX_FILEOFFSET 1024ULL*1024ULL*MEBI
+# endif
+#endif
+
+static inline void DEDUP_ASSERT_INODE(uint64_t inode) {
+#ifdef DEDUP_DEBUG_MAX_INODE
+	uint64_t max=(DEDUP_DEBUG_MAX_INODE);
+	assert(max >= inode);
+#endif
+}
+
+static inline void DEDUP_ASSERT_ROOT(uint64_t root) {
+#ifdef DEDUP_DEBUG_MAX_ROOT
+	uint64_t max=(DEDUP_DEBUG_MAX_ROOT);
+	assert(max >= root);
+#endif
+}
+
+static inline void DEDUP_ASSERT_LOGICAL(uint64_t logical) {
+#ifdef DEDUP_DEBUG_MAX_LOGICAL
+	uint64_t max=(DEDUP_DEBUG_MAX_LOGICAL);
+	assert(max >= logical);
+#endif
+	assert(0==logical%BLOCKSIZE);
+}
+
+static inline void DEDUP_ASSERT_FILEOFFSET(uint64_t fileoffset) {
+#ifdef DEDUP_DEBUG_MAX_FILEOFFSET
+	uint64_t max=(DEDUP_DEBUG_MAX_FILEOFFSET);
+	assert(max >= fileoffset);
+#endif
+	assert(0==fileoffset%BLOCKSIZE);
+}
+
+
+#include <btrfs/ioctl.h>
+
+static inline uint64_t MIN(uint64_t x, uint64_t y) {
+	return (((x)>(y))?(y):(x));
+}
+
+typedef struct {
+	uint64_t key;
+	uint64_t index;
+} metaindex_t;
+
+uint64_t getmetaindex(uint64_t index, uint64_t *checkinds, uint64_t metalen);
+int64_t do_search(int fd, uint32_t **checksums, uint64_t **checkoffs, uint64_t **checkinds);
+int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_t **extinds);
+
+int64_t do_sais(uint32_t *checksums, uint64_t *checkoffs, uint64_t *checkinds, uint64_t **dedups, uint64_t metalen, uint64_t minsumsize, uint64_t minextlen);
+
+int rtable_init(uint64_t size);
+uint64_t rtable_destroy();
+size_t logical_resolve(int fd, uint64_t logical, uint64_t *results, size_t *size);
+int open_by_inode(int atfd, uint64_t inum, uint64_t root);
+int64_t btrfs_iterate_tree(int fd, uint64_t tree, void *private, int (*callback)(void*, struct btrfs_ioctl_search_header*, void*));
+int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offsets, unsigned count, int64_t *results);
+
+int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size);
+
+#endif
+
+
