@@ -105,20 +105,20 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 	uint64_t *extsums;
 	uint64_t *extoffs;
 	uint64_t *extinds;
-    int ret=rtable_init(rtable_size);
-    assert(!ret);
+	int ret=rtable_init(rtable_size);
+	assert(!ret);
 	int tmpfd=openat(atfd, ".", O_RDWR|O_TMPFILE|O_EXCL);
 	assert(0<=tmpfd);
 	ret=ftruncate(tmpfd, INT_MAX);
-    assert(!ret);
+	assert(!ret);
 	int64_t metalen=do_extent_search(atfd, &extsums, &extoffs, &extinds);
 	printf("Extent tree cache built\n");
 
-    assert(0<=ret);
-    for (uint64_t i=0; i<deduplen*3; i+=3) {
-        if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2],tmpfd,extsums,extoffs,extinds,metalen)))
-            fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
-    }
+	assert(0<=ret);
+	for (uint64_t i=0; i<deduplen*3; i+=3) {
+		if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2],tmpfd,extsums,extoffs,extinds,metalen)))
+			fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
+	}
 	free(extsums);
 	free(extoffs);
 	free(extinds);
