@@ -101,7 +101,7 @@ out:
 	return ret;
 }
 
-int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size) {
+int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size, uint64_t generation) {
 	uint64_t *extsums;
 	uint64_t *extoffs;
 	uint64_t *extinds;

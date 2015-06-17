@@ -171,7 +171,8 @@ int64_t btrfs_iterate_tree(int fd, uint64_t tree, void *private, int (*callback)
 		sh=(struct btrfs_ioctl_search_header*)args->buf;
 		for (uint64_t i=0; i < args->key.nr_items; i++) {
 			char *temp=(char*)(sh+1);
-			callback(temp, sh, private);
+			if ((ret=callback(temp, sh, private)))
+				goto out;
 
 			args->key.min_offset=sh->offset+1;
 			args->key.min_type=sh->type;
@@ -185,6 +186,27 @@ out:
 	free(args);
 	return ret;
 }
+
+static int get_generation_cb(void *data, struct btrfs_ioctl_search_header *sh, void *private) {
+	if (BTRFS_ROOT_ITEM_KEY != sh->type )
+		return 0;
+	assert(sizeof(struct btrfs_root_item) <=sh->len);
+	struct btrfs_root_item *ritem=(struct btrfs_root_item*)data;
+	uint64_t *genptr=private;
+	if (ritem->generation > *genptr)
+		*genptr=ritem->generation;
+
+	return 0;
+}
+
+int64_t btrfs_get_generation(int fd) {
+	uint64_t generation=0;
+	int64_t ret=btrfs_iterate_tree(fd, BTRFS_ROOT_TREE_OBJECTID, &generation, get_generation_cb);
+	if (0>ret)
+		return ret;
+	return generation;
+}
+
 
 int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offsets, unsigned count, int64_t *results) {
 	size_t fullsize=sizeof(struct btrfs_ioctl_same_args)+count*sizeof(struct btrfs_ioctl_same_extent_info);

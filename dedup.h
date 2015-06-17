@@ -81,8 +81,9 @@ size_t logical_resolve(int fd, uint64_t logical, uint64_t *results, size_t *size
 int open_by_inode(int atfd, uint64_t inum, uint64_t root);
 int64_t btrfs_iterate_tree(int fd, uint64_t tree, void *private, int (*callback)(void*, struct btrfs_ioctl_search_header*, void*));
 int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offsets, unsigned count, int64_t *results);
+int64_t btrfs_get_generation(int fd);
 
-int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size);
+int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size, uint64_t generation);
 
 #endif
 

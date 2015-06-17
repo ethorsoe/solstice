@@ -93,6 +93,7 @@ int main(int argc, char **argv) {
 		exit(EXIT_FAILURE);
 	}
 
+	int64_t generation=btrfs_get_generation(atfd);
 	int64_t metalen = do_search(atfd, &inmem, &checkoffs, &checkinds);
 	if (0>metalen) {
 		fprintf(stderr, "Search failed with %s\n", strerror(-metalen));
@@ -109,7 +110,7 @@ int main(int argc, char **argv) {
 	free(checkinds);
 	free(checkoffs);
 
-	ret=do_dedups(atfd, dedups, deduplen, arguments.rtable_size);
+	ret=do_dedups(atfd, dedups, deduplen, arguments.rtable_size, generation);
 	assert(0 <= ret);
 	printf("Dedup done, took %lu s, %lu root cache misses\n", (uint64_t)(time(NULL)-prevtime), rtable_destroy());
 	free(dedups);
