@@ -45,7 +45,6 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 		assert(INT_MAX>len);
 		fileoffset1=0;
 	} else {
-		DEDUP_ASSERT_LOGICAL(offset1);
 		int64_t metaind1=getmetaindex(offset1, extoffs, metalen);
 		if (0>metaind1) {
 			printf("No files found for logical address %lu\n", offset1);
@@ -54,6 +53,10 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 		inode1=extsums[extinds[metaind1]+1];
 		fileoffset1=extsums[extinds[metaind1]+2];
 		root1 = extsums[extinds[metaind1]+3];
+		DEDUP_ASSERT_LOGICAL(offset1);
+		DEDUP_ASSERT_ROOT(root1);
+		DEDUP_ASSERT_FILEOFFSET(fileoffset1);
+		DEDUP_ASSERT_INODE(inode1);
 		fd1=open_by_inode(atfd, inode1, root1);
 		if (0>fd1) {
 			printf("Inode %lu on root %lu disappeared\n", inode1, root1);
@@ -80,16 +83,13 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 	}
 	len=MIN(get_extent_len(fd2, fileoffset2, len), len);
 
-	DEDUP_ASSERT_ROOT(root1);
 	DEDUP_ASSERT_ROOT(root2);
 	DEDUP_ASSERT_LOGICAL(offset2);
-	DEDUP_ASSERT_FILEOFFSET(fileoffset1);
 	DEDUP_ASSERT_FILEOFFSET(fileoffset2);
-	DEDUP_ASSERT_INODE(inode1);
 	DEDUP_ASSERT_INODE(inode2);
 	
 	if (fd1 == tmpfd)
-		printf("nonsparse zeroes %6lu @ %10lu [%lu] len %8lu\n", inode2, root2, offset2, len);
+		printf("nonsparse zeroes %6lu @ %10lu [%lu] len %8lu\n", inode2, root2, fileoffset2, len);
 	else
 		printf("inode %6lu @ %6lu [%10lu] & %6lu @ %6lu [%10lu] len %8lu\n", inode2, root2, fileoffset2, inode1, root1, fileoffset1, len);
 
