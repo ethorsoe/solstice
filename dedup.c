@@ -50,9 +50,9 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 			printf("No files found for logical address %lu\n", offset1);
 			return -ENOENT;
 		}
-		inode1=extsums[extinds[metaind1]+1];
-		fileoffset1=extsums[extinds[metaind1]+2];
-		root1 = extsums[extinds[metaind1]+3];
+		inode1=extsums[extinds[metaind1]+2];
+		fileoffset1=extsums[extinds[metaind1]+3];
+		root1 = extsums[extinds[metaind1]+4];
 		DEDUP_ASSERT_LOGICAL(offset1);
 		DEDUP_ASSERT_ROOT(root1);
 		DEDUP_ASSERT_FILEOFFSET(fileoffset1);
@@ -66,9 +66,9 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 	}
 
 	int64_t metaind2=getmetaindex(offset2, extoffs, metalen);
-	uint64_t inode2=extsums[extinds[metaind2]+1];
-	uint64_t fileoffset2=extsums[extinds[metaind2]+2];
-	uint64_t root2 = extsums[extinds[metaind2]+3];
+	uint64_t inode2=extsums[extinds[metaind2]+2];
+	uint64_t fileoffset2=extsums[extinds[metaind2]+3];
+	uint64_t root2 = extsums[extinds[metaind2]+4];
 	if (0 > metaind2) {
 		printf("No files found for logical address %lu\n", offset2);
 		ret=-ENOENT;

@@ -82,6 +82,7 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 
 	uint64_t extoffset=my_private->extinds[my_private->metaoffset];
 	my_private->extsums[extoffset++]=sh->offset;
+	my_private->extsums[extoffset++]=eitem->generation;
 
 	int found=0;
 	for (struct btrfs_extent_inline_ref *iref=(struct btrfs_extent_inline_ref*)(eitem+1); iref < (struct btrfs_extent_inline_ref *)(sh->len+(char*)data);) {
