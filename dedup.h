@@ -28,6 +28,7 @@
 #endif
 
 static inline void DEDUP_ASSERT_INODE(uint64_t inode) {
+	(void)inode;
 #ifdef DEDUP_DEBUG_MAX_INODE
 	uint64_t max=(DEDUP_DEBUG_MAX_INODE);
 	assert(max >= inode);
@@ -35,6 +36,7 @@ static inline void DEDUP_ASSERT_INODE(uint64_t inode) {
 }
 
 static inline void DEDUP_ASSERT_ROOT(uint64_t root) {
+	(void)root;
 #ifdef DEDUP_DEBUG_MAX_ROOT
 	uint64_t max=(DEDUP_DEBUG_MAX_ROOT);
 	assert(max >= root);

@@ -101,7 +101,7 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 
 		DEDUP_ASSERT_FILEOFFSET(eref->offset);
 		DEDUP_ASSERT_INODE(eref->objectid);
-		DEDUP_ASSERT_ROOT(DEDUP_DEBUG_MAX_ROOT >= eref->root);
+		DEDUP_ASSERT_ROOT(eref->root);
 		my_private->extsums[extoffset++]=eref->objectid;
 		my_private->extsums[extoffset++]=eref->offset;
 		my_private->extsums[extoffset++]=eref->root;
