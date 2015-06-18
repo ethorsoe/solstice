@@ -21,59 +21,100 @@
 #include <sais64.h>
 #include "dedup.h"
 
-static int64_t get_extent_len(int fd, uint64_t offset, uint64_t expected) {
-	char stackalloc[sizeof(struct fiemap)*sizeof(struct fiemap_extent)];
+typedef struct {
+	uint64_t fileoffset;
+	uint64_t extent;
+	uint32_t len;
+} relextent_t;
+
+static int64_t get_extent_ref_info(int fd, uint64_t fileoffset, uint64_t extent, uint64_t extlen, uint64_t expected, relextent_t *rels, uint64_t nelem) {
+	size_t fullsize=sizeof(struct fiemap)+nelem*sizeof(struct fiemap_extent);
+	char stackalloc[fullsize];
 	struct fiemap *map=(struct fiemap*)stackalloc;
-	memset(map, 0, sizeof(struct fiemap)*sizeof(struct fiemap_extent));
+	memset(map, 0, fullsize);
 	int ret;
-	map->fm_start=offset;
+	map->fm_start=fileoffset;
 	map->fm_length=expected;
-	map->fm_extent_count=1;
+	map->fm_extent_count=nelem;
 	if (0>ioctl(fd, FS_IOC_FIEMAP, map))
-		ret=-errno;
-	else
-		ret=map->fm_extents[0].fe_length-offset+map->fm_extents[0].fe_logical;
-	return ret;
+		return -errno;
+
+	ret=map->fm_mapped_extents;
+	assert(0<=ret);
+	uint64_t nfound=0;
+	for (uint64_t i=0; i < (unsigned)ret; i++ ) {
+		if (map->fm_extents[i].fe_physical >= extent+extlen || map->fm_extents[i].fe_physical < extent) {
+			continue;
+		}
+		rels[nfound].extent=map->fm_extents[i].fe_physical;
+		rels[nfound].fileoffset=map->fm_extents[i].fe_logical;
+		assert(INT_MAX > map->fm_extents[i].fe_length);
+		rels[nfound++].len=map->fm_extents[i].fe_length;
+	}
+
+	return nfound;
 }
 
-static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int tmpfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
-	uint64_t fileoffset1, inode1, root1;
+static int64_t get_extent_metaindex(uint64_t offset, uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t generation, uint64_t len) {
+	int64_t ret=getmetaindex(offset, extoffs, metalen);
+	if (0>ret)
+		return ret;
+	assert(metalen > (uint64_t)ret);
+	assert(offset >= extoffs[ret] || 0 == ret);
+	for (;(uint64_t)ret<metalen;ret++) {
+		if (extsums[extinds[ret]+1] > generation)
+			continue;
+		if (offset >extoffs[ret] + extsums[extinds[ret]])
+			continue;
+		if (offset+len < extoffs[ret])
+			return -ENOENT;
+		return ret;
+	}
+	return -ENOENT;
+}
+
+static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int tmpfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t generation) {
+	uint64_t inode1, root1;
 	int fd1, fd2, ret=0;
+	relextent_t rel1, rel2;
+	DEDUP_ASSERT_LOGICAL(offset2);
+
 
 	if (DEDUP_SPECIAL_OFFSET_ZEROES == offset1) {
 		fd1=tmpfd;
 		assert(INT_MAX>len);
-		fileoffset1=0;
+		rel1.fileoffset=0;
 	} else {
-		int64_t metaind1=getmetaindex(offset1, extoffs, metalen);
+		DEDUP_ASSERT_LOGICAL(offset1);
+		int64_t metaind1=get_extent_metaindex(offset1, extsums, extoffs, extinds, metalen, generation, len*BLOCKSIZE);
 		if (0>metaind1) {
 			printf("No files found for logical address %lu\n", offset1);
 			return -ENOENT;
 		}
 		inode1=extsums[extinds[metaind1]+2];
-		fileoffset1=extsums[extinds[metaind1]+3];
 		root1 = extsums[extinds[metaind1]+4];
-		DEDUP_ASSERT_LOGICAL(offset1);
 		DEDUP_ASSERT_ROOT(root1);
-		DEDUP_ASSERT_FILEOFFSET(fileoffset1);
 		DEDUP_ASSERT_INODE(inode1);
 		fd1=open_by_inode(atfd, inode1, root1);
 		if (0>fd1) {
 			printf("Inode %lu on root %lu disappeared\n", inode1, root1);
 			return -ENOENT;
 		}
-		len=MIN(get_extent_len(fd1, fileoffset1, len), len);
+		ret=get_extent_ref_info(fd1, extsums[extinds[metaind1]+3], extoffs[metaind1], len*BLOCKSIZE, len*BLOCKSIZE, &rel1, 1);
+		assert(0<ret);
+		DEDUP_ASSERT_FILEOFFSET(rel1.fileoffset);
 	}
 
-	int64_t metaind2=getmetaindex(offset2, extoffs, metalen);
-	uint64_t inode2=extsums[extinds[metaind2]+2];
-	uint64_t fileoffset2=extsums[extinds[metaind2]+3];
-	uint64_t root2 = extsums[extinds[metaind2]+4];
+	int64_t metaind2=get_extent_metaindex(offset2, extsums, extoffs, extinds, metalen, generation, len*BLOCKSIZE);
 	if (0 > metaind2) {
 		printf("No files found for logical address %lu\n", offset2);
 		ret=-ENOENT;
 		goto out;
 	}
+	uint64_t inode2=extsums[extinds[metaind2]+2];
+	uint64_t root2 = extsums[extinds[metaind2]+4];
+	DEDUP_ASSERT_ROOT(root2);
+	DEDUP_ASSERT_INODE(inode2);
 	assert(0<=ret);
 	fd2=open_by_inode(atfd, inode2, root2);
 	if (0>fd2) {
@@ -81,17 +122,14 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 		ret=-ENOENT;
 		goto out;
 	}
-	len=MIN(get_extent_len(fd2, fileoffset2, len), len);
-
-	DEDUP_ASSERT_ROOT(root2);
-	DEDUP_ASSERT_LOGICAL(offset2);
-	DEDUP_ASSERT_FILEOFFSET(fileoffset2);
-	DEDUP_ASSERT_INODE(inode2);
+	ret=get_extent_ref_info(fd2, extsums[extinds[metaind2]+3], extoffs[metaind2], len*BLOCKSIZE, len*BLOCKSIZE, &rel2, 1);
+	assert(0<ret);
+	DEDUP_ASSERT_FILEOFFSET(rel2.fileoffset);
 	
 	if (fd1 == tmpfd)
-		printf("nonsparse zeroes %6lu @ %10lu [%lu] len %8lu\n", inode2, root2, fileoffset2, len);
+		printf("nonsparse zeroes %6lu @ %10lu [%lu] len %8lu\n", inode2, root2, rel2.fileoffset, len);
 	else
-		printf("inode %6lu @ %6lu [%10lu] & %6lu @ %6lu [%10lu] len %8lu\n", inode2, root2, fileoffset2, inode1, root1, fileoffset1, len);
+		printf("inode %6lu @ %6lu [%10lu] & %6lu @ %6lu [%10lu] len %8lu\n", inode2, root2, rel2.fileoffset, inode1, root1, rel1.fileoffset, len);
 
 
 	close(fd2);
@@ -116,7 +154,7 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 
 	assert(0<=ret);
 	for (uint64_t i=0; i<deduplen*3; i+=3) {
-		if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2],tmpfd,extsums,extoffs,extinds,metalen)))
+		if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2],tmpfd,extsums,extoffs,extinds,metalen,generation)))
 			fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
 	}
 	free(extsums);
