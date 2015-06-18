@@ -58,6 +58,7 @@ typedef struct {
 	uint64_t *extsums;
 	uint64_t *extoffs;
 	uint64_t *extinds;
+	uint64_t generation;
 } search_extent_private_t;
 
 enum allowed_type {
@@ -78,11 +79,12 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 	struct btrfs_extent_item* eitem=data;
 	if (2 == eitem->flags)
 		return 0;
+	if (my_private->generation < eitem->generation)
+		return 0;
 	assert(1 == eitem->flags);
 
 	uint64_t extoffset=my_private->extinds[my_private->metaoffset];
 	my_private->extsums[extoffset++]=sh->offset;
-	my_private->extsums[extoffset++]=eitem->generation;
 
 	int found=0;
 	for (struct btrfs_extent_inline_ref *iref=(struct btrfs_extent_inline_ref*)(eitem+1); iref < (struct btrfs_extent_inline_ref *)(sh->len+(char*)data);) {
@@ -177,7 +179,7 @@ int64_t do_search(int fd, uint32_t **checksums, uint64_t **checkoffs, uint64_t *
 
 #define allowtype(x) types[x]=TYPE_ALLOW
 #define ignoretype(x) types[x]=TYPE_IGNORE
-int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_t **extinds) {
+int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_t **extinds, uint64_t max_generation) {
 	assert(sizeof(uint32_t)==CHECKSUMSIZE);
 	
 	search_extent_private_t private;
@@ -192,6 +194,7 @@ int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_
 	private.extinds=malloc(private.metalen*sizeof(uint64_t));
 	assert(private.extinds);
 	private.extinds[0]=0;
+	private.generation=max_generation;
 
 	memset(types, 0, sizeof(types));
 	allowtype(BTRFS_EXTENT_ITEM_KEY);

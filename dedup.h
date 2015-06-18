@@ -73,7 +73,7 @@ typedef struct {
 
 uint64_t getmetaindex(uint64_t index, uint64_t *checkinds, uint64_t metalen);
 int64_t do_search(int fd, uint32_t **checksums, uint64_t **checkoffs, uint64_t **checkinds);
-int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_t **extinds);
+int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_t **extinds, uint64_t max_generation);
 
 int64_t do_sais(uint32_t *checksums, uint64_t *checkoffs, uint64_t *checkinds, uint64_t **dedups, uint64_t metalen, uint64_t minsumsize, uint64_t minextlen);
 
