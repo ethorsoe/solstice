@@ -21,6 +21,10 @@
 #include <sais64.h>
 #include "dedup.h"
 
+#define DEDUP_MAX_ITERATIONS 1
+#define DEDUP_OPERATION_DONE 0
+#define DEDUP_OPERATION_TODO 1
+
 typedef struct {
 	uint64_t fileoffset;
 	uint64_t extent;
@@ -71,6 +75,7 @@ static int64_t get_extent_metaindex(uint64_t offset, uint64_t *extsums,uint64_t 
 	return -ENOENT;
 }
 
+
 static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int tmpfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
 	uint64_t inode1, root1;
 	int fd1, fd2, ret=0;
@@ -84,7 +89,7 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 		rel1.fileoffset=0;
 	} else {
 		DEDUP_ASSERT_LOGICAL(offset1);
-		int64_t metaind1=get_extent_metaindex(offset1, extsums, extoffs, extinds, metalen, len*BLOCKSIZE);
+		int64_t metaind1=get_extent_metaindex(offset1, extsums, extoffs, extinds, metalen, len);
 		if (0>metaind1) {
 			printf("No files found for logical address %lu\n", offset1);
 			return -ENOENT;
@@ -98,12 +103,12 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 			printf("Inode %lu on root %lu disappeared\n", inode1, root1);
 			return -ENOENT;
 		}
-		ret=get_extent_ref_info(fd1, extsums[extinds[metaind1]+2], extoffs[metaind1], len*BLOCKSIZE, len*BLOCKSIZE, &rel1, 1);
+		ret=get_extent_ref_info(fd1, extsums[extinds[metaind1]+2], extoffs[metaind1], len, len, &rel1, 1);
 		assert(0<ret);
 		DEDUP_ASSERT_FILEOFFSET(rel1.fileoffset);
 	}
 
-	int64_t metaind2=get_extent_metaindex(offset2, extsums, extoffs, extinds, metalen, len*BLOCKSIZE);
+	int64_t metaind2=get_extent_metaindex(offset2, extsums, extoffs, extinds, metalen, len);
 	if (0 > metaind2) {
 		printf("No files found for logical address %lu\n", offset2);
 		ret=-ENOENT;
@@ -120,7 +125,7 @@ static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int
 		ret=-ENOENT;
 		goto out;
 	}
-	ret=get_extent_ref_info(fd2, extsums[extinds[metaind2]+2], extoffs[metaind2], len*BLOCKSIZE, len*BLOCKSIZE, &rel2, 1);
+	ret=get_extent_ref_info(fd2, extsums[extinds[metaind2]+2], extoffs[metaind2], len, len, &rel2, 1);
 	assert(0<ret);
 	DEDUP_ASSERT_FILEOFFSET(rel2.fileoffset);
 	
@@ -147,17 +152,28 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 	assert(0<=tmpfd);
 	ret=ftruncate(tmpfd, INT_MAX);
 	assert(!ret);
-	int64_t metalen=do_extent_search(atfd, &extsums, &extoffs, &extinds, generation);
-	printf("Extent tree cache built\n");
 
-	assert(0<=ret);
-	for (uint64_t i=0; i<deduplen*3; i+=3) {
-		if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2],tmpfd,extsums,extoffs,extinds,metalen)))
-			fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
+	for (uint64_t j=0; DEDUP_MAX_ITERATIONS > j; j++ ) {
+		uint64_t leftind=0;
+		int64_t metalen=do_extent_search(atfd, &extsums, &extoffs, &extinds, generation);
+		printf("Extent tree cache built\n");
+		assert(0 <= metalen);
+
+		for (uint64_t i=0; i<deduplen*3; i+=3) {
+			if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2]*BLOCKSIZE,tmpfd,extsums,extoffs,extinds,metalen)))
+				fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
+			if (DEDUP_OPERATION_TODO == ret) {
+				dedups[leftind++]=dedups[i];
+				dedups[leftind++]=dedups[i+1];
+				dedups[leftind++]=dedups[i+2];
+			}
+		}
+		deduplen=leftind/3;
+		free(extsums);
+		free(extoffs);
+		free(extinds);
 	}
-	free(extsums);
-	free(extoffs);
-	free(extinds);
+
 	close(tmpfd);
 	return 0;
 }
