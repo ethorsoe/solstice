@@ -207,6 +207,17 @@ int64_t btrfs_get_generation(int fd) {
 	return generation;
 }
 
+int btrfs_clone_range(int src_fd, int dest_fd, uint64_t src_offset, uint64_t dest_offset, uint64_t len) {
+	struct btrfs_ioctl_clone_range_args args;
+	args.src_fd=src_fd;
+	args.src_offset=src_offset;
+	args.src_length=len;
+	args.dest_offset=dest_offset;
+
+	int ret=ioctl(dest_fd, BTRFS_IOC_CLONE_RANGE, &args);
+	if (0>ret) return -errno;
+	return 0;
+}
 
 int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offsets, unsigned count, int64_t *results) {
 	size_t fullsize=sizeof(struct btrfs_ioctl_same_args)+count*sizeof(struct btrfs_ioctl_same_extent_info);
