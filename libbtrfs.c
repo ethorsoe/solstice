@@ -224,29 +224,40 @@ int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offs
 	char stackalloc[fullsize];
 	memset(stackalloc,0,fullsize);
 	struct btrfs_ioctl_same_args *args=(struct btrfs_ioctl_same_args*)&stackalloc;
-	args->logical_offset=logical;
-	args->length=len;
 	args->dest_count=count;
-	for (unsigned i=0; i<count;i++) {
-		args->info[i].fd=fds[i];
-		args->info[i].logical_offset=offsets[i];
-	}
-	int ret=ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, args);
-	if (0>ret) return -errno;
-	if (NULL != results) for (unsigned i=0; i<count;i++) {
-		switch (BTRFS_SAME_DATA_DIFFERS==args->info[i].status) {
-			case BTRFS_SAME_DATA_DIFFERS:
-				results[i]=-EMEDIUMTYPE;
-				break;
-			case 0:
-				results[i]=args->info[i].bytes_deduped;
-				break;
-			default:
-				assert(0 > args->info[i].status);
-				results[i]=args->info[i].status;
-				break;
+	uint64_t nextstep, failed=0;
+	int64_t ret;
+	for (uint64_t progress=0; !failed && progress < len; progress+=nextstep) {
+		args->logical_offset=logical+progress;
+		args->length=len-progress;
+		for (unsigned i=0; i<count;i++) {
+			args->info[i].fd=fds[i];
+			args->info[i].logical_offset=offsets[i]+progress;
+		}
+		ret=ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, args);
+		if (0>ret) return -errno;
+		nextstep=args->info[0].bytes_deduped;
+		if (0 >= nextstep) {
+			failed=1;
+			ret=-EMEDIUMTYPE;
+		}
+		for (unsigned i=0; i<count;i++) {
+			if (nextstep != args->info[i].bytes_deduped) return -ENOLINK;
+			if (NULL != results) {
+				switch (args->info[i].status) {
+					case BTRFS_SAME_DATA_DIFFERS:
+						results[i]=-EMEDIUMTYPE;
+						break;
+					case 0:
+						results[i]+=args->info[i].bytes_deduped;
+						break;
+					default:
+						assert(0 > args->info[i].status);
+						results[i]=args->info[i].status;
+						break;
+				}
+			}
 		}
 	}
-
 	return ret;
 }
