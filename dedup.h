@@ -59,6 +59,12 @@ static inline void DEDUP_ASSERT_FILEOFFSET(uint64_t fileoffset) {
 	assert(0==fileoffset%BLOCKSIZE);
 }
 
+static inline void DEDUP_ASSERT_STATIC_FS(int assertion) {
+	(void)assertion;
+#ifdef DEDUP_DEBUG_STATIC_FS
+	assert(assertion);
+#endif
+}
 
 #include <btrfs/ioctl.h>
 
