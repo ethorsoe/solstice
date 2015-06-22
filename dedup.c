@@ -193,69 +193,41 @@ static int link_srcfile(int atfd, uint64_t offset1, uint64_t offset2, uint64_t l
 	return ret;
 }
 
-static int dedup(int atfd, uint64_t offset1, uint64_t offset2, uint64_t len, int tmpfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
-	uint64_t inode1, root1;
-	int fd1, fd2, ret=0;
-	relextent_t rel1, rel2;
-	DEDUP_ASSERT_LOGICAL(offset2);
-
-
-	if (DEDUP_SPECIAL_OFFSET_ZEROES == offset1) {
-		fd1=tmpfd;
-		assert(INT_MAX>len);
-		rel1.fileoffset=0;
-	} else {
-		DEDUP_ASSERT_LOGICAL(offset1);
-		int64_t metaind1=get_extent_metaindex(offset1, extsums, extoffs, extinds, metalen, len);
-		if (0>metaind1) {
-			printf("No files found for logical address %lu\n", offset1);
-			return -ENOENT;
+static int dedup(int atfd, uint64_t offset, uint64_t len, int srcfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
+	int64_t ret=DEDUP_OPERATION_DONE, fd=-1;
+	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
+		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
+		DEDUP_ASSERT_FILEOFFSET(extlen);
+		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
+			uint64_t inode=extsums[refiter];
+			uint64_t fileoffset=extsums[refiter+1];
+			uint64_t root= extsums[refiter+2];
+			DEDUP_ASSERT_ROOT(root);
+			DEDUP_ASSERT_FILEOFFSET(fileoffset);
+			DEDUP_ASSERT_INODE(inode);
+			int fd=open_by_inode(atfd, inode, root);
+			DEDUP_ASSERT_STATIC_FS(0<=fd);
+			if (0>fd) {
+				printf("Inode %lu on root %lu disappeared\n", inode, root);
+				return -ENOENT;
+			}
+			relextent_t rel;
+			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
+			if (nentries && fileoffset == rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent > extent_offset) {
+				DEDUP_ASSERT_STATIC_FS(0);
+				return -ENOENT;
+			}
+			int64_t result;
+			ret=btrfs_dedup(srcfd, rel.extent, rel.len, &fd, &(rel.fileoffset), 1, &result);
+			if (0>ret) goto out;
+			if (0>result) return result;
+			ret=DEDUP_OPERATION_TODO;
+			close(fd);
+			fd=-1;
 		}
-		inode1=extsums[extinds[metaind1]+1];
-		root1 = extsums[extinds[metaind1]+3];
-		DEDUP_ASSERT_ROOT(root1);
-		DEDUP_ASSERT_INODE(inode1);
-		fd1=open_by_inode(atfd, inode1, root1);
-		if (0>fd1) {
-			printf("Inode %lu on root %lu disappeared\n", inode1, root1);
-			return -ENOENT;
-		}
-		ret=get_extent_ref_info(fd1, extsums[extinds[metaind1]+2], extoffs[metaind1], len, len, &rel1, 1);
-		assert(0<ret);
-		DEDUP_ASSERT_FILEOFFSET(rel1.fileoffset);
 	}
-
-	int64_t metaind2=get_extent_metaindex(offset2, extsums, extoffs, extinds, metalen, len);
-	if (0 > metaind2) {
-		printf("No files found for logical address %lu\n", offset2);
-		ret=-ENOENT;
-		goto out;
-	}
-	uint64_t inode2=extsums[extinds[metaind2]+1];
-	uint64_t root2 = extsums[extinds[metaind2]+3];
-	DEDUP_ASSERT_ROOT(root2);
-	DEDUP_ASSERT_INODE(inode2);
-	assert(0<=ret);
-	fd2=open_by_inode(atfd, inode2, root2);
-	if (0>fd2) {
-		printf("Inode %lu on root %lu disappeared\n", inode2,root2);
-		ret=-ENOENT;
-		goto out;
-	}
-	ret=get_extent_ref_info(fd2, extsums[extinds[metaind2]+2], extoffs[metaind2], len, len, &rel2, 1);
-	assert(0<ret);
-	DEDUP_ASSERT_FILEOFFSET(rel2.fileoffset);
-	
-	if (fd1 == tmpfd)
-		printf("nonsparse zeroes %6lu @ %10lu [%lu] len %8lu\n", inode2, root2, rel2.fileoffset, len);
-	else
-		printf("inode %6lu @ %6lu [%10lu] & %6lu @ %6lu [%10lu] len %8lu\n", inode2, root2, rel2.fileoffset, inode1, root1, rel1.fileoffset, len);
-
-
-	close(fd2);
 out:
-	if (fd1 != tmpfd) close(fd1);
-
+	if (0<=fd) close(fd);
 	return ret;
 }
 
@@ -312,8 +284,8 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 		assert(0 <= metalen);
 
 		for (uint64_t i=0; i<deduplen*3; i+=3) {
-			if (0>(ret=dedup(atfd,dedups[i],dedups[i+1],dedups[i+2]*BLOCKSIZE,tmpfd,extsums,extoffs,extinds,metalen)))
-				fprintf(stderr, "Dedup of %lu & %lu of %lu failed with %s\n", dedups[i],dedups[i+1],dedups[i+2], strerror(-ret));
+			if (0>(ret=dedup(atfd,dedups[i+1],dedups[i+2]*BLOCKSIZE,tmpfd,extsums,extoffs,extinds,metalen)))
+				fprintf(stderr, "Dedup of %lu of %lu failed with %s\n", dedups[i+1],dedups[i+2], strerror(-ret));
 			if (DEDUP_OPERATION_TODO == ret) {
 				dedups[leftind++]=dedups[i];
 				dedups[leftind++]=dedups[i+1];
