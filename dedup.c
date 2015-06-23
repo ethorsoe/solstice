@@ -146,7 +146,7 @@ static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile,
 			DEDUP_ASSERT_ROOT(root);
 			DEDUP_ASSERT_FILEOFFSET(fileoffset);
 			DEDUP_ASSERT_INODE(inode);
-			int fd=open_by_inode(atfd, inode, root);
+			fd=open_by_inode(atfd, inode, root);
 			DEDUP_ASSERT_STATIC_FS(0<=fd);
 			if (0>fd) {
 				printf("Inode %lu on root %lu disappeared\n", inode, root);
@@ -156,7 +156,8 @@ static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile,
 			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
 			if (nentries && fileoffset == rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent > extent_offset) {
 				DEDUP_ASSERT_STATIC_FS(0);
-				return -ENOENT;
+				ret=-ENOENT;
+				goto out;
 			}
 			if (type & DEDUP_LINKTYPE_COPY) {
 				ret=copy_no_overwrite(fd, srcfile, fileoffset, rel.extent, rel.len, src_map, DEDUP_LINKTYPE_COPY);
