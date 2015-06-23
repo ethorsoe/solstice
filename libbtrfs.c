@@ -223,6 +223,7 @@ int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offs
 	size_t fullsize=sizeof(struct btrfs_ioctl_same_args)+count*sizeof(struct btrfs_ioctl_same_extent_info);
 	char stackalloc[fullsize];
 	memset(stackalloc,0,fullsize);
+	memset(results,0,count*sizeof(int64_t));
 	struct btrfs_ioctl_same_args *args=(struct btrfs_ioctl_same_args*)&stackalloc;
 	args->dest_count=count;
 	uint64_t nextstep, failed=0;
