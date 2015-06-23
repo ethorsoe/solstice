@@ -118,7 +118,7 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 	my_private->extinds[my_private->metaoffset]=extoffset;
 	if (my_private->extlen-extoffset < MEBI) {
 		my_private->extlen+=32*MEBI;
-		my_private->extsums=realloc(my_private->extsums, my_private->extlen*sizeof(uint32_t));
+		my_private->extsums=realloc(my_private->extsums, my_private->extlen*sizeof(uint64_t));
 	}
 	if (my_private->metalen-my_private->metaoffset <= MEBI) {
 		my_private->metalen+=32*MEBI;
@@ -187,7 +187,7 @@ int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_
 	private.metalen=32*MEBI;
 	private.metaoffset=0;
 	private.extlen=32*MEBI;
-	private.extsums=malloc(private.extlen*sizeof(uint32_t));
+	private.extsums=malloc(private.extlen*sizeof(uint64_t));
 	assert(private.extsums);
 	private.extoffs=malloc(private.metalen*sizeof(uint64_t));
 	assert(private.extoffs);
