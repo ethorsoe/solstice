@@ -40,8 +40,11 @@ static int64_t get_extent_ref_info(int fd, uint64_t fileoffset, uint64_t extent,
 	map->fm_start=fileoffset;
 	map->fm_length=expected;
 	map->fm_extent_count=nelem;
-	if (0>ioctl(fd, FS_IOC_FIEMAP, map))
-		return -errno;
+	if (0>ioctl(fd, FS_IOC_FIEMAP, map)) {
+		ret=-errno;
+		assert(0>ret);
+		return ret;
+	}
 
 	ret=map->fm_mapped_extents;
 	assert(0<=ret);
