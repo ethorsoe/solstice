@@ -154,7 +154,11 @@ static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile,
 			}
 			relextent_t rel;
 			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
-			if (nentries && fileoffset == rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent > extent_offset) {
+			if (0>nentries) {
+				ret=nentries;
+				goto out;
+			}
+			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
 				DEDUP_ASSERT_STATIC_FS(0);
 				ret=-ENOENT;
 				goto out;
@@ -195,7 +199,8 @@ static int link_srcfile(int atfd, uint64_t offset1, uint64_t offset2, uint64_t l
 }
 
 static int dedup(int atfd, uint64_t offset, uint64_t len, int srcfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
-	int64_t ret=DEDUP_OPERATION_DONE, fd=-1;
+	int64_t ret=DEDUP_OPERATION_DONE;
+	int fd=-1;
 	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
 		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
 		DEDUP_ASSERT_FILEOFFSET(extlen);
@@ -206,7 +211,7 @@ static int dedup(int atfd, uint64_t offset, uint64_t len, int srcfd,uint64_t *ex
 			DEDUP_ASSERT_ROOT(root);
 			DEDUP_ASSERT_FILEOFFSET(fileoffset);
 			DEDUP_ASSERT_INODE(inode);
-			int fd=open_by_inode(atfd, inode, root);
+			fd=open_by_inode(atfd, inode, root);
 			DEDUP_ASSERT_STATIC_FS(0<=fd);
 			if (0>fd) {
 				printf("Inode %lu on root %lu disappeared\n", inode, root);
@@ -214,9 +219,14 @@ static int dedup(int atfd, uint64_t offset, uint64_t len, int srcfd,uint64_t *ex
 			}
 			relextent_t rel;
 			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
-			if (nentries && fileoffset == rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent > extent_offset) {
+			if (0>nentries) {
+				ret=nentries;
+				goto out;
+			}
+			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
 				DEDUP_ASSERT_STATIC_FS(0);
-				return -ENOENT;
+				ret=-ENOENT;
+				goto out;
 			}
 			int64_t result;
 			ret=btrfs_dedup(srcfd, rel.extent, rel.len, &fd, &(rel.fileoffset), 1, &result);
