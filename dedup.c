@@ -90,6 +90,48 @@ static int64_t ffwd_extent_metaindex(uint64_t offset, uint64_t index, uint64_t *
 	return -ENOENT;
 }
 
+static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src_fd, uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, int64_t (*callback)(int,int,relextent_t*,void*), void *private) {
+	int64_t ret=DEDUP_OPERATION_DONE;
+	int fd=-1;
+	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
+		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
+		DEDUP_ASSERT_FILEOFFSET(extlen);
+		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
+			uint64_t inode=extsums[refiter];
+			uint64_t fileoffset=extsums[refiter+1];
+			uint64_t root= extsums[refiter+2];
+			DEDUP_ASSERT_ROOT(root);
+			DEDUP_ASSERT_FILEOFFSET(fileoffset);
+			DEDUP_ASSERT_INODE(inode);
+			fd=open_by_inode(atfd, inode, root);
+			DEDUP_ASSERT_STATIC_FS(0<=fd);
+			if (0>fd) {
+				printf("Inode %lu on root %lu disappeared\n", inode, root);
+				return -ENOENT;
+			}
+			relextent_t rel;
+			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
+			if (0>nentries) {
+				ret=nentries;
+				goto out;
+			}
+			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
+				DEDUP_ASSERT_STATIC_FS(0);
+				ret=-ENOENT;
+				goto out;
+			}
+			if ((ret=callback(fd, src_fd, &rel,  private)))
+				goto out;
+
+			close(fd);
+			fd=-1;
+			ret=DEDUP_OPERATION_TODO;
+		}
+	}
+out:
+	if (0<=fd) close(fd);
+	return ret;
+}
 
 #define DEDUP_LINKTYPE_CONTENT (1ULL << 0ULL)
 #define DEDUP_LINKTYPE_CORONA (1ULL << 1ULL)
@@ -137,49 +179,27 @@ static int64_t copy_no_overwrite(int srcfd, int destfd, uint64_t src_offset, uin
 	return done;
 }
 
-static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile, char *src_map ,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t type) {
-	int64_t ret=DEDUP_OPERATION_DONE, fd=-1;
-	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
-		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
-		DEDUP_ASSERT_FILEOFFSET(extlen);
-		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
-			uint64_t inode=extsums[refiter];
-			uint64_t fileoffset=extsums[refiter+1];
-			uint64_t root= extsums[refiter+2];
-			DEDUP_ASSERT_ROOT(root);
-			DEDUP_ASSERT_FILEOFFSET(fileoffset);
-			DEDUP_ASSERT_INODE(inode);
-			fd=open_by_inode(atfd, inode, root);
-			DEDUP_ASSERT_STATIC_FS(0<=fd);
-			if (0>fd) {
-				printf("Inode %lu on root %lu disappeared\n", inode, root);
-				return -ENOENT;
-			}
-			relextent_t rel;
-			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
-			if (0>nentries) {
-				ret=nentries;
-				goto out;
-			}
-			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
-				DEDUP_ASSERT_STATIC_FS(0);
-				ret=-ENOENT;
-				goto out;
-			}
-			if (type & DEDUP_LINKTYPE_COPY) {
-				ret=copy_no_overwrite(fd, srcfile, fileoffset, rel.extent, rel.len, src_map, DEDUP_LINKTYPE_COPY);
-				if (0>ret) goto out;
-			} else{
-				ret=copy_no_overwrite(fd, srcfile, fileoffset, rel.extent, rel.len, NULL, 0);
-				if (0>ret) goto out;
-			}
-			ret=DEDUP_OPERATION_TODO;
-			close(fd);
-			fd=-1;
-		}
+struct link_to_srcfile_t {
+	uint64_t type;
+	void *src_map;
+};
+static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, void* private) {
+	struct link_to_srcfile_t *mydata=(struct link_to_srcfile_t*)private;
+	int64_t ret;
+	if (mydata->type & DEDUP_LINKTYPE_COPY) {
+		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, DEDUP_LINKTYPE_COPY);
+		if (0>ret) return ret;
+	} else{
+		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, NULL, 0);
+		if (0>ret) return ret;
 	}
-out:
-	if (0<=fd) close(fd);
+	return 0;
+}
+static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile, char *src_map ,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t type) {
+	struct link_to_srcfile_t mydata;
+	mydata.type=type;
+	mydata.src_map=src_map;
+	int ret=iterate_extent_range(atfd, offset, len, srcfile, extsums, extoffs, extinds, metalen, link_to_srcfile_cb, &mydata);
 	return ret;
 }
 
@@ -201,48 +221,13 @@ static int link_srcfile(int atfd, uint64_t offset1, uint64_t offset2, uint64_t l
 	return ret;
 }
 
-static int dedup(int atfd, uint64_t offset, uint64_t len, int srcfd,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen) {
-	int64_t ret=DEDUP_OPERATION_DONE;
-	int fd=-1;
-	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
-		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
-		DEDUP_ASSERT_FILEOFFSET(extlen);
-		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
-			uint64_t inode=extsums[refiter];
-			uint64_t fileoffset=extsums[refiter+1];
-			uint64_t root= extsums[refiter+2];
-			DEDUP_ASSERT_ROOT(root);
-			DEDUP_ASSERT_FILEOFFSET(fileoffset);
-			DEDUP_ASSERT_INODE(inode);
-			fd=open_by_inode(atfd, inode, root);
-			DEDUP_ASSERT_STATIC_FS(0<=fd);
-			if (0>fd) {
-				printf("Inode %lu on root %lu disappeared\n", inode, root);
-				return -ENOENT;
-			}
-			relextent_t rel;
-			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
-			if (0>nentries) {
-				ret=nentries;
-				goto out;
-			}
-			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
-				DEDUP_ASSERT_STATIC_FS(0);
-				ret=-ENOENT;
-				goto out;
-			}
-			int64_t result;
-			ret=btrfs_dedup(srcfd, rel.extent, rel.len, &fd, &(rel.fileoffset), 1, &result);
-			if (0>ret) goto out;
-			if (0>result) return result;
-			ret=DEDUP_OPERATION_TODO;
-			close(fd);
-			fd=-1;
-		}
-	}
-out:
-	if (0<=fd) close(fd);
-	return ret;
+static int64_t dedup_cb(int fd, int src_fd, relextent_t* rel, void* private) {
+	(void)private;
+	int64_t result;
+	int64_t ret=btrfs_dedup(src_fd, rel->extent, rel->len, &fd, &(rel->fileoffset), 1, &result);
+	if (0>ret) return ret;
+	if (0>result) return result;
+	return 0;
 }
 
 int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size, uint64_t generation) {
@@ -298,7 +283,7 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 		assert(0 <= metalen);
 
 		for (uint64_t i=0; i<deduplen*3; i+=3) {
-			if (0>(ret=dedup(atfd,dedups[i+1],dedups[i+2]*BLOCKSIZE,tmpfd,extsums,extoffs,extinds,metalen)))
+			if (0>(ret=iterate_extent_range(atfd,dedups[i+1],dedups[i+2]*BLOCKSIZE,tmpfd,extsums,extoffs,extinds,metalen,dedup_cb,NULL)))
 				fprintf(stderr, "Dedup of %lu of %lu failed with %s\n", dedups[i+1],dedups[i+2], strerror(-ret));
 			if (DEDUP_OPERATION_TODO == ret) {
 				dedups[leftind++]=dedups[i];
