@@ -69,53 +69,66 @@ enum allowed_type {
 enum allowed_type types[256];
 
 static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, void *private) {
+	search_extent_private_t *my_private=private;
+	uint64_t extoffset=my_private->extinds[my_private->metaoffset];
 	assert(256 > sh->type);
 	assert((16*1024) > sh->len);
 	if (TYPE_IGNORE == types[sh->type])
 		return 0;
 	assert(TYPE_ALLOW == types[sh->type]);
-	search_extent_private_t *my_private=private;
-	assert(24 < sh->len);
-	struct btrfs_extent_item* eitem=data;
-	if (2 == eitem->flags)
-		return 0;
-	if (my_private->generation < eitem->generation)
-		return 0;
-	assert(1 == eitem->flags);
-
-	uint64_t extoffset=my_private->extinds[my_private->metaoffset];
-	my_private->extsums[extoffset++]=sh->offset;
-
-	int found=0;
-	for (struct btrfs_extent_inline_ref *iref=(struct btrfs_extent_inline_ref*)(eitem+1); iref < (struct btrfs_extent_inline_ref *)(sh->len+(char*)data);) {
-		if (BTRFS_SHARED_DATA_REF_KEY == iref->type) {
-			struct btrfs_shared_data_ref *sref=(struct btrfs_shared_data_ref*)(iref+1);
-			iref=(struct btrfs_extent_inline_ref*)(sref+1);
-			continue;
-		}
-		assert(BTRFS_EXTENT_DATA_REF_KEY == iref->type);
-		struct btrfs_extent_data_ref *eref=(void*)&(iref->offset);
-		iref=(struct btrfs_extent_inline_ref*)(eref+1);
-	
-		if (BTRFS_FS_TREE_OBJECTID != eref->root && MIN_SUBVOL >= eref->root) {
+	if (BTRFS_EXTENT_DATA_REF_KEY == sh->type){
+			assert(0<my_private->metaoffset && my_private->extoffs[my_private->metaoffset-1] == sh->objectid);
+			struct btrfs_extent_data_ref *eref=data;
+			DEDUP_ASSERT_FILEOFFSET(eref->offset);
+			DEDUP_ASSERT_INODE(eref->objectid);
+			DEDUP_ASSERT_ROOT(eref->root);
+			my_private->extsums[extoffset++]=eref->objectid;
+			my_private->extsums[extoffset++]=eref->offset;
+			my_private->extsums[extoffset++]=eref->root;
+			my_private->extinds[my_private->metaoffset]=extoffset;
+	} else {
+		assert(BTRFS_EXTENT_ITEM_KEY == sh->type);
+		assert(24 < sh->len);
+		struct btrfs_extent_item* eitem=data;
+		if (2 == eitem->flags)
 			return 0;
+		if (my_private->generation < eitem->generation)
+			return 0;
+		assert(1 == eitem->flags);
+
+		my_private->extsums[extoffset++]=sh->offset;
+
+		int found=0;
+		for (struct btrfs_extent_inline_ref *iref=(struct btrfs_extent_inline_ref*)(eitem+1); iref < (struct btrfs_extent_inline_ref *)(sh->len+(char*)data);) {
+			if (BTRFS_SHARED_DATA_REF_KEY == iref->type) {
+				struct btrfs_shared_data_ref *sref=(struct btrfs_shared_data_ref*)(iref+1);
+				iref=(struct btrfs_extent_inline_ref*)(sref+1);
+				continue;
+			}
+			assert(BTRFS_EXTENT_DATA_REF_KEY == iref->type);
+			struct btrfs_extent_data_ref *eref=(void*)&(iref->offset);
+			iref=(struct btrfs_extent_inline_ref*)(eref+1);
+
+			if (BTRFS_FS_TREE_OBJECTID != eref->root && MIN_SUBVOL >= eref->root) {
+				return 0;
+			}
+
+			DEDUP_ASSERT_FILEOFFSET(eref->offset);
+			DEDUP_ASSERT_INODE(eref->objectid);
+			DEDUP_ASSERT_ROOT(eref->root);
+			my_private->extsums[extoffset++]=eref->objectid;
+			my_private->extsums[extoffset++]=eref->offset;
+			my_private->extsums[extoffset++]=eref->root;
+
+			found=1;
 		}
+		if (!found)
+			return 0;
 
-		DEDUP_ASSERT_FILEOFFSET(eref->offset);
-		DEDUP_ASSERT_INODE(eref->objectid);
-		DEDUP_ASSERT_ROOT(eref->root);
-		my_private->extsums[extoffset++]=eref->objectid;
-		my_private->extsums[extoffset++]=eref->offset;
-		my_private->extsums[extoffset++]=eref->root;
-
-		found=1;
+		my_private->extoffs[my_private->metaoffset++]=sh->objectid;
+		my_private->extoffs[my_private->metaoffset]=sh->objectid+sh->offset;
+		my_private->extinds[my_private->metaoffset]=extoffset;
 	}
-	if (!found)
-		return 0;
-
-	my_private->extoffs[my_private->metaoffset++]=sh->objectid;
-	my_private->extoffs[my_private->metaoffset]=sh->objectid+sh->offset;
-	my_private->extinds[my_private->metaoffset]=extoffset;
 	if (my_private->extlen-extoffset < MEBI) {
 		my_private->extlen+=32*MEBI;
 		my_private->extsums=realloc(my_private->extsums, my_private->extlen*sizeof(uint64_t));
@@ -198,6 +211,7 @@ int64_t do_extent_search(int fd, uint64_t **extsums, uint64_t **extoffs, uint64_
 
 	memset(types, 0, sizeof(types));
 	allowtype(BTRFS_EXTENT_ITEM_KEY);
+	allowtype(BTRFS_EXTENT_DATA_REF_KEY);
 	ignoretype(BTRFS_BLOCK_GROUP_ITEM_KEY);
 	ignoretype(BTRFS_METADATA_ITEM_KEY);
 	ignoretype(BTRFS_SHARED_DATA_REF_KEY);
