@@ -237,13 +237,7 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 	int ret=rtable_init(rtable_size);
 	assert(!ret);
 #ifdef DEDUP_DEBUG_LINK_SRCFILE
-#define DEDUP_DEBUG_STRINGIFY(x) #x
-#define DEDUP_DEBUG_NAME(x) DEDUP_DEBUG_STRINGIFY(x)
-#define DEDUP_DEBUG_LINK_SRCFILE_NAME DEDUP_DEBUG_NAME(DEDUP_DEBUG_LINK_SRCFILE)
 	int tmpfd=openat(atfd, DEDUP_DEBUG_LINK_SRCFILE_NAME, O_RDWR|O_CREAT|O_EXCL, S_IRWXU);
-#undef DEDUP_DEBUG_LINK_SRCFILE_NAME
-#undef DEDUP_DEBUG_NAME
-#undef DEDUP_DEBUG_STRINGIFY
 #else
 	int tmpfd=openat(atfd, ".", O_RDWR|O_TMPFILE|O_EXCL);
 #endif

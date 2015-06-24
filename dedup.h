@@ -66,6 +66,10 @@ static inline void DEDUP_ASSERT_STATIC_FS(int assertion) {
 #endif
 }
 
+#define DEDUP_DEBUG_STRINGIFY_MACRO(x) #x
+#define DEDUP_DEBUG_NAME_MACRO(x) DEDUP_DEBUG_STRINGIFY_MACRO(x)
+#define DEDUP_DEBUG_LINK_SRCFILE_NAME DEDUP_DEBUG_NAME_MACRO(DEDUP_DEBUG_LINK_SRCFILE)
+
 #include <btrfs/ioctl.h>
 
 static inline uint64_t MIN(uint64_t x, uint64_t y) {
