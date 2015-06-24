@@ -143,3 +143,31 @@ int64_t do_sais(uint32_t *checksums, uint64_t *checkoffs, uint64_t *checkinds, u
 	free(outmem);
 	return dedupsize;
 }
+
+int64_t find_zeros(uint32_t *checksums, uint64_t *checkoffs, uint64_t *checkinds, uint64_t **dedups, uint64_t metalen, uint64_t minextlen) {
+	uint64_t dedupalloc=30*MEBI, dedupsize=0;
+	int64_t ret;
+	*dedups=malloc(dedupalloc*3*sizeof(uint64_t));
+	for (uint64_t metaindex=0; metaindex<metalen; metaindex++) {
+		uint64_t zerolen=0, allzero=1;
+		for (uint64_t sumindex=checkinds[metaindex]; sumindex<checkinds[metaindex+1]; sumindex++) {
+			if (checksums[sumindex] == DEDUP_ZERO_CRC) {
+				zerolen++;
+			} else {
+				allzero=0;
+				if (minextlen <= zerolen) {
+					ret=add_dedup(dedups, &dedupsize, &dedupalloc, DEDUP_SPECIAL_OFFSET_ZEROES, checkoffs[metaindex]+BLOCKSIZE*(sumindex-zerolen-checkinds[metaindex]), zerolen);
+					if (0>ret)
+						return ret;
+				}
+				zerolen=0;
+			}
+		}
+		if (allzero) {
+			ret=add_dedup(dedups, &dedupsize, &dedupalloc, DEDUP_SPECIAL_OFFSET_ZEROES, checkoffs[metaindex], zerolen);
+			if (0>ret)
+				return ret;
+		}
+	}
+	return dedupsize;
+}
