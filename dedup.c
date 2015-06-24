@@ -69,9 +69,9 @@ static int64_t get_extent_metaindex(uint64_t offset, uint64_t *extsums,uint64_t 
 	assert(metalen > (uint64_t)ret);
 	assert(offset >= extoffs[ret] || 0 == ret);
 	for (;(uint64_t)ret<metalen;ret++) {
-		if (offset >extoffs[ret] + extsums[extinds[ret]])
+		if (offset >=extoffs[ret] + extsums[extinds[ret]])
 			continue;
-		if (offset+len < extoffs[ret])
+		if (offset+len <= extoffs[ret])
 			return -ENOENT;
 		return ret;
 	}
@@ -81,9 +81,9 @@ static int64_t get_extent_metaindex(uint64_t offset, uint64_t *extsums,uint64_t 
 static int64_t ffwd_extent_metaindex(uint64_t offset, uint64_t index, uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t len) {
 	index++;
 	for (;index<metalen;index++) {
-		if (offset >extoffs[index] + extsums[extinds[index]])
+		if (offset >= extoffs[index] + extsums[extinds[index]])
 			continue;
-		if (offset+len < extoffs[index])
+		if (offset+len <= extoffs[index])
 			return -ENOENT;
 		return index;
 	}
