@@ -180,16 +180,43 @@ static int64_t copy_no_overwrite(int srcfd, int destfd, uint64_t src_offset, uin
 
 struct link_to_srcfile_t {
 	uint64_t type;
+	uint64_t logical;
+	uint64_t len;
 	void *src_map;
 };
 static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, void* private) {
 	struct link_to_srcfile_t *mydata=(struct link_to_srcfile_t*)private;
 	int64_t ret;
-	if (mydata->type & DEDUP_LINKTYPE_COPY) {
-		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, DEDUP_LINKTYPE_COPY);
-		if (0>ret) return ret;
-	} else{
-		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, NULL, 0);
+	assert(mydata->type & (DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_CONTENT));
+	if (!(mydata->type & DEDUP_LINKTYPE_CONTENT)) {
+		if (rel->extent < mydata->logical) {
+			assert(rel->extent+rel->len > mydata->logical);
+			ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, mydata->logical-rel->extent, mydata->src_map, mydata->type & DEDUP_LINKTYPE_COPY);
+			if (0>ret) return ret;
+		}
+		if (rel->extent+rel->len > mydata->logical+mydata->len) {
+			uint64_t diff=mydata->logical+mydata->len-rel->extent;
+			rel->extent+=diff;
+			rel->fileoffset+=diff;
+			rel->len-=diff;
+			ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, mydata->type & DEDUP_LINKTYPE_COPY);
+			if (0>ret) return ret;
+		}
+	} else {
+		if (!(mydata->type & DEDUP_LINKTYPE_CORONA)) {
+			if (rel->extent >= mydata->logical+mydata->len)
+				return 0;
+			if (rel->extent + rel->len > mydata->logical+mydata->len) {
+				rel->len=mydata->logical+mydata->len-rel->extent;
+			}
+			if (rel->extent < mydata->logical) {
+				uint64_t diff=mydata->logical-rel->extent;
+				rel->fileoffset+=diff;
+				rel->len-=diff;
+				rel->extent+=diff;
+			}
+		}
+		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, mydata->type & DEDUP_LINKTYPE_COPY);
 		if (0>ret) return ret;
 	}
 	return 0;
@@ -198,6 +225,8 @@ static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile,
 	struct link_to_srcfile_t mydata;
 	mydata.type=type;
 	mydata.src_map=src_map;
+	mydata.logical=offset;
+	mydata.len=len;
 	int ret=iterate_extent_range(atfd, offset, len, srcfile, extsums, extoffs, extinds, metalen, link_to_srcfile_cb, &mydata);
 	return ret;
 }
