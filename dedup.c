@@ -165,15 +165,14 @@ static int64_t copy_no_overwrite(int srcfd, int destfd, uint64_t src_offset, uin
 			nextents++;
 		}
 		for (int64_t relindex=0; relindex<nextents; relindex++) {
-			if (current_dest_offset >= rels[relindex].fileoffset) {
-				current_dest_offset=rels[relindex].fileoffset+rels[relindex].len;
-				continue;
+			if (current_dest_offset < rels[relindex].fileoffset) {
+				uint64_t this_part_len=rels[relindex].fileoffset-current_dest_offset;
+				uint64_t current_src_offset=src_offset+current_dest_offset-dest_offset;
+				int64_t ret=copy_yes_overwrite(srcfd, destfd, current_src_offset, current_dest_offset, this_part_len, dest_map, type);
+				if (0>ret) return ret;
+				done=DEDUP_OPERATION_TODO;
 			}
-			uint64_t this_part_len=rels[relindex].fileoffset-current_dest_offset;
-			uint64_t current_src_offset=src_offset+current_dest_offset-dest_offset;
-			int64_t ret=copy_yes_overwrite(srcfd, destfd, current_src_offset, current_dest_offset, this_part_len, dest_map, type);
-			if (0>ret) return ret;
-			done=DEDUP_OPERATION_TODO;
+			current_dest_offset=rels[relindex].fileoffset+rels[relindex].len;
 		}
 	}
 	return done;
