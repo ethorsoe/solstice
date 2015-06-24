@@ -1,4 +1,5 @@
 #define _XOPEN_SOURCE 9000
+#define _GNU_SOURCE
 #include <stdint.h>
 #include <unistd.h>
 #include <limits.h>
@@ -261,4 +262,23 @@ int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offs
 		}
 	}
 	return ret;
+}
+
+int btrfs_syncfs(int fd) {
+	int ret=syncfs(fd);
+	if (ret)
+		return -errno;
+	ret=ioctl(fd,BTRFS_IOC_SYNC);
+	if (ret)
+		return -errno;
+	ret = ioctl(fd, BTRFS_IOC_START_SYNC, NULL);
+	if (ret)
+		return -errno;
+	ret=ioctl(fd, BTRFS_IOC_WAIT_SYNC, NULL);
+	if (ret)
+		return -errno;
+	ret=syncfs(fd);
+	if (ret)
+		return -errno;
+	return 0;
 }

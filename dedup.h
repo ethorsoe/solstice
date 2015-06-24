@@ -96,6 +96,7 @@ int64_t btrfs_iterate_tree(int fd, uint64_t tree, void *private, int (*callback)
 int btrfs_dedup(int fd, uint64_t logical, uint64_t len, int *fds, uint64_t *offsets, unsigned count, int64_t *results);
 int64_t btrfs_get_generation(int fd);
 int btrfs_clone_range(int src_fd, int dest_fd, uint64_t src_offset, uint64_t dest_offset, uint64_t len);
+int btrfs_syncfs(int fd);
 
 int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_size, uint64_t generation);
 
