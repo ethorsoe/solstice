@@ -273,6 +273,8 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 
 	uint64_t leftind=0;
 	int64_t metalen=do_extent_search(atfd, &extsums, &extoffs, &extinds, generation);
+	if (0>=metalen)
+		return metalen;
 	uint64_t fs_max_logical_orig=extoffs[metalen-1]+extsums[extinds[metalen-1]];
 	DEDUP_ASSERT_LOGICAL(fs_max_logical_orig);
 	ret=ftruncate(tmpfd, INT_MAX+fs_max_logical_orig);

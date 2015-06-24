@@ -39,6 +39,7 @@ int64_t do_sais(uint32_t *checksums, uint64_t *checkoffs, uint64_t *checkinds, u
 	uint64_t dedupalloc=30*MEBI, dedupsize=0;
 	*dedups=malloc(dedupalloc*3*sizeof(uint64_t));
 	int ret;
+	if (!metalen) return 0;
 
 	uint64_t nsaisblocks=nblocks*(minsumsize/unitsize);
 
