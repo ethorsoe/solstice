@@ -102,7 +102,35 @@ int main(int argc, char **argv) {
 	assert(INT_MAX>metalen);
 	printf("Search done %lu checksums in %lu pieces, took %lu s\n", checkinds[metalen],metalen, (uint64_t)(time(NULL)-prevtime));
 	prevtime=time(NULL);
-	int64_t deduplen = do_sais(inmem, checkoffs, checkinds, &dedups, metalen, arguments.minsumsize, arguments.minextlen);
+	int64_t deduplen = find_zeros(inmem, checkoffs, checkinds, &dedups, metalen, arguments.minextlen);
+	assert(0<=deduplen);
+	printf("Dedup zerofind done %lu candidates, took %lu s\n", deduplen, (uint64_t)(time(NULL)-prevtime));
+	prevtime=time(NULL);
+	free(inmem);
+	free(checkinds);
+	free(checkoffs);
+
+	ret=do_dedups(atfd, dedups, deduplen, arguments.rtable_size, generation);
+	assert(0 <= ret);
+	printf("Hole punch done, took %lu s, %lu root cache misses\n", (uint64_t)(time(NULL)-prevtime), rtable_destroy());
+	free(dedups);
+#ifdef DEDUP_DEBUG_LINK_SRCFILE
+	ret=renameat(atfd, DEDUP_DEBUG_LINK_SRCFILE_NAME, atfd, DEDUP_DEBUG_LINK_SRCFILE_NAME "-zeros");
+	assert(0<=ret);
+#endif
+	ret=btrfs_syncfs(atfd);
+	assert(0<=ret);
+
+	generation=btrfs_get_generation(atfd);
+	metalen = do_search(atfd, &inmem, &checkoffs, &checkinds);
+	if (0>metalen) {
+		fprintf(stderr, "Search failed with %s\n", strerror(-metalen));
+		return EXIT_FAILURE;
+	}
+	assert(INT_MAX>metalen);
+	printf("Search done %lu checksums in %lu pieces, took %lu s\n", checkinds[metalen],metalen, (uint64_t)(time(NULL)-prevtime));
+	prevtime=time(NULL);
+	deduplen = do_sais(inmem, checkoffs, checkinds, &dedups, metalen, arguments.minsumsize, arguments.minextlen);
 	assert(0<=deduplen);
 	printf("Dedup sort done %lu candidates, took %lu s\n", deduplen, (uint64_t)(time(NULL)-prevtime));
 	prevtime=time(NULL);
