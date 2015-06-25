@@ -92,6 +92,8 @@ int main(int argc, char **argv) {
 		perror("Unable to open mount point");
 		exit(EXIT_FAILURE);
 	}
+	ret=btrfs_syncfs(atfd);
+	assert(0<=ret);
 
 	int64_t generation=btrfs_get_generation(atfd);
 	int64_t metalen = do_search(atfd, &inmem, &checkoffs, &checkinds);
