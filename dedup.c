@@ -116,7 +116,6 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 				goto out;
 			}
 			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
-				DEDUP_ASSERT_STATIC_FS(0);
 				ret=-ENOENT;
 				goto out;
 			}
