@@ -297,6 +297,11 @@ int do_dedups(int atfd, uint64_t *dedups, uint64_t deduplen, uint64_t rtable_siz
 	free(extsums);
 	free(extoffs);
 	free(extinds);
+	for (uint64_t i=0; i<deduplen*3; i+=3) {
+		if (DEDUP_SPECIAL_OFFSET_ZEROES == dedups[i])
+			if (0>(ret=fallocate(tmpfd, FALLOC_FL_PUNCH_HOLE|FALLOC_FL_KEEP_SIZE, dedups[i+1], dedups[i+2]*BLOCKSIZE)))
+				return ret;;
+	}
 	printf("Srcfile created, %lu items to handle\n", deduplen);
 
 	for (uint64_t j=0; DEDUP_MAX_ITERATIONS > j; j++ ) {
