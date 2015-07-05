@@ -90,7 +90,7 @@ static int64_t ffwd_extent_metaindex(uint64_t offset, uint64_t index, uint64_t *
 	return -ENOENT;
 }
 
-static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src_fd, uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, int64_t (*callback)(int,int,relextent_t*,void*), void *private) {
+static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src_fd, uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, int64_t (*callback)(int,int,relextent_t*,uint64_t,uint64_t,void*), void *private) {
 	int64_t ret=DEDUP_OPERATION_DONE;
 	int fd=-1;
 	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
@@ -115,11 +115,12 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 				ret=nentries;
 				goto out;
 			}
-			if (!nentries || fileoffset != rel.fileoffset || extlen+extent_offset < rel.extent+rel.len || rel.extent < extent_offset) {
+			assert(fileoffset <= rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent >= extent_offset);
+			if (!nentries) {
 				ret=-ENOENT;
 				goto out;
 			}
-			if ((ret=callback(fd, src_fd, &rel,  private)))
+			if ((ret=callback(fd, src_fd, &rel, physextent, extlen, private)))
 				goto out;
 
 			close(fd);
@@ -181,11 +182,15 @@ struct link_to_srcfile_t {
 	uint64_t type;
 	uint64_t logical;
 	uint64_t len;
+	uint64_t limit;
 	void *src_map;
 };
-static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, void* private) {
+static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, uint64_t physextent, uint64_t extlen, void* private) {
 	struct link_to_srcfile_t *mydata=(struct link_to_srcfile_t*)private;
 	int64_t ret;
+	uint64_t linktype = mydata->type;
+	if (physextent+extlen > mydata->limit)
+		linktype=DEDUP_LINKTYPE_COPY;
 	assert(mydata->type & (DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_CONTENT));
 	if (!(mydata->type & DEDUP_LINKTYPE_CONTENT)) {
 		if (rel->extent < mydata->logical) {
@@ -215,17 +220,18 @@ static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, void* pr
 				rel->extent+=diff;
 			}
 		}
-		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, mydata->type & DEDUP_LINKTYPE_COPY);
+		ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, rel->len, mydata->src_map, linktype & DEDUP_LINKTYPE_COPY);
 		if (0>ret) return ret;
 	}
 	return 0;
 }
-static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile, char *src_map ,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t type) {
+static int link_to_srcfile(int atfd, uint64_t offset, uint64_t len, int srcfile, char *src_map ,uint64_t *extsums,uint64_t *extoffs,uint64_t *extinds, uint64_t metalen, uint64_t limit, uint64_t type) {
 	struct link_to_srcfile_t mydata;
 	mydata.type=type;
 	mydata.src_map=src_map;
 	mydata.logical=offset;
 	mydata.len=len;
+	mydata.limit=limit;
 	int ret=iterate_extent_range(atfd, offset, len, srcfile, extsums, extoffs, extinds, metalen, link_to_srcfile_cb, &mydata);
 	return ret;
 }
@@ -235,21 +241,23 @@ static int link_srcfile(int atfd, uint64_t offset1, uint64_t offset2, uint64_t l
 	int ret;
 
 	if (DEDUP_SPECIAL_OFFSET_ZEROES == offset1) {
-		ret=link_to_srcfile(atfd, offset2, len, srcfile, src_map, extsums, extoffs, extinds, metalen, DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_COPY);
+		ret=link_to_srcfile(atfd, offset2, len, srcfile, src_map, extsums, extoffs, extinds, metalen, -1ULL, DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_COPY);
 
 	} else {
 		DEDUP_ASSERT_LOGICAL(offset1);
-		if (0 >= (ret=link_to_srcfile(atfd, offset1, len, srcfile, src_map, extsums, extoffs, extinds, metalen, DEDUP_LINKTYPE_CONTENT)))
+		if (0 >= (ret=link_to_srcfile(atfd, offset1, len, srcfile, src_map, extsums, extoffs, extinds, metalen, offset2, DEDUP_LINKTYPE_CONTENT)))
 			return ret;
 		if (0 > (ret=copy_no_overwrite(srcfile, srcfile, offset1, offset2, len, NULL, 0)))
 			return ret;
-		ret=link_to_srcfile(atfd, offset2, len, srcfile, src_map, extsums, extoffs, extinds, metalen, DEDUP_LINKTYPE_CONTENT|DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_COPY);
+		ret=link_to_srcfile(atfd, offset2, len, srcfile, src_map, extsums, extoffs, extinds, metalen, -1ULL, DEDUP_LINKTYPE_CONTENT|DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_COPY);
 	}
 	return ret;
 }
 
-static int64_t dedup_cb(int fd, int src_fd, relextent_t* rel, void* private) {
+static int64_t dedup_cb(int fd, int src_fd, relextent_t* rel, uint64_t physextent, uint64_t extlen, void* private) {
 	(void)private;
+	(void)physextent;
+	(void)extlen;
 	int64_t result;
 	int64_t ret=btrfs_dedup(src_fd, rel->extent, rel->len, &fd, &(rel->fileoffset), 1, &result);
 	if (0>ret) return ret;
