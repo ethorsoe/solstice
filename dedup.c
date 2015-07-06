@@ -169,8 +169,9 @@ static int64_t copy_yes_overwrite(int srcfd, int destfd, uint64_t src_offset, ui
 static int64_t copy_no_overwrite(int srcfd, int destfd, uint64_t src_offset, uint64_t dest_offset, uint64_t len, char* dest_map, uint64_t type) {
 	relextent_t rels[DEDUP_NEXTENTS];
 	int64_t done=DEDUP_OPERATION_DONE;
+	uint64_t offset_diff=0;
 	for (uint64_t current_dest_offset=dest_offset; current_dest_offset<dest_offset+len;){
-		int64_t nextents=get_extent_ref_info(destfd, dest_offset, 0, -1ULL, len, rels, DEDUP_NEXTENTS);
+		int64_t nextents=get_extent_ref_info(destfd, current_dest_offset, 0, -1ULL, len-offset_diff, rels, DEDUP_NEXTENTS);
 		if (0>nextents)
 			return nextents;
 		if (DEDUP_NEXTENTS > nextents) {
@@ -181,12 +182,13 @@ static int64_t copy_no_overwrite(int srcfd, int destfd, uint64_t src_offset, uin
 		for (int64_t relindex=0; relindex<nextents; relindex++) {
 			if (current_dest_offset < rels[relindex].fileoffset) {
 				uint64_t this_part_len=rels[relindex].fileoffset-current_dest_offset;
-				uint64_t current_src_offset=src_offset+current_dest_offset-dest_offset;
+				uint64_t current_src_offset=src_offset+offset_diff;
 				int64_t ret=copy_yes_overwrite(srcfd, destfd, current_src_offset, current_dest_offset, this_part_len, dest_map, type);
 				if (0>ret) return ret;
 				done=DEDUP_OPERATION_TODO;
 			}
 			current_dest_offset=rels[relindex].fileoffset+rels[relindex].len;
+			offset_diff=current_dest_offset-dest_offset;
 		}
 	}
 	return done;
