@@ -36,28 +36,36 @@ static int64_t get_extent_ref_info(int fd, uint64_t fileoffset, uint64_t extent,
 	char stackalloc[fullsize];
 	struct fiemap *map=(struct fiemap*)stackalloc;
 	memset(map, 0, fullsize);
-	int ret;
-	map->fm_start=fileoffset;
-	map->fm_length=expected;
-	map->fm_extent_count=nelem;
-	if (0>ioctl(fd, FS_IOC_FIEMAP, map)) {
-		ret=-errno;
-		assert(0>ret);
-		return ret;
-	}
 
-	ret=map->fm_mapped_extents;
-	assert(0<=ret);
-	uint64_t nfound=0;
-	for (uint64_t i=0; i < (unsigned)ret; i++ ) {
-		if (map->fm_extents[i].fe_physical >= extent+extlen || map->fm_extents[i].fe_physical < extent) {
-			continue;
+	uint64_t nfound=0, nextents, cur_offset=fileoffset;
+
+	do {
+		map->fm_start=cur_offset;
+		map->fm_length=expected-(cur_offset-fileoffset);
+		map->fm_extent_count=nelem;
+		if (0>ioctl(fd, FS_IOC_FIEMAP, map)) {
+			int ret;
+			if (EINVAL == errno) {
+				ret=nfound;
+			} else {
+				ret=-errno;
+				assert(0>ret);
+			}
+			return ret;
 		}
-		rels[nfound].extent=map->fm_extents[i].fe_physical;
-		rels[nfound].fileoffset=map->fm_extents[i].fe_logical;
-		assert(INT_MAX > map->fm_extents[i].fe_length);
-		rels[nfound++].len=map->fm_extents[i].fe_length;
-	}
+
+		nextents=map->fm_mapped_extents;
+		for (uint64_t i=0; i < nextents; i++ ) {
+			if (map->fm_extents[i].fe_physical >= extent+extlen || map->fm_extents[i].fe_physical < extent) {
+				continue;
+			}
+			rels[nfound].extent=map->fm_extents[i].fe_physical;
+			rels[nfound].fileoffset=map->fm_extents[i].fe_logical;
+			assert(INT_MAX > map->fm_extents[i].fe_length);
+			rels[nfound++].len=map->fm_extents[i].fe_length;
+		}
+		cur_offset=map->fm_extents[nextents-1].fe_logical+map->fm_extents[nextents-1].fe_length;
+	} while(0 < nextents && cur_offset < fileoffset+extlen);
 
 	return nfound;
 }
@@ -94,34 +102,40 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 	int64_t ret=DEDUP_OPERATION_DONE;
 	int fd=-1;
 	for (int64_t physextent=get_extent_metaindex(offset,extsums,extoffs,extinds,metalen,len); 0 <= physextent ;physextent=ffwd_extent_metaindex(offset, physextent, extsums, extoffs, extinds, metalen, len)) {
-		uint64_t nextstep=3, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
+		uint64_t nextstep=4, extlen=extsums[extinds[physextent]], extent_offset=extoffs[physextent];
 		DEDUP_ASSERT_FILEOFFSET(extlen);
 		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
 			uint64_t inode=extsums[refiter];
 			uint64_t fileoffset=extsums[refiter+1];
-			uint64_t root= extsums[refiter+2];
+			uint64_t root=extsums[refiter+2];
+			uint64_t refcount=extsums[refiter+3];
 			DEDUP_ASSERT_ROOT(root);
 			DEDUP_ASSERT_FILEOFFSET(fileoffset);
 			DEDUP_ASSERT_INODE(inode);
+			DEDUP_ASSERT_COUNT(refcount);
 			fd=open_by_inode(atfd, inode, root);
 			DEDUP_ASSERT_STATIC_FS(0<=fd);
 			if (0>fd) {
 				printf("Inode %lu on root %lu disappeared\n", inode, root);
 				return -ENOENT;
 			}
-			relextent_t rel;
-			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, &rel, 1);
+
+			assert(1000 >= refcount);
+			relextent_t rels[1000];
+			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, rels, refcount);
 			if (0>nentries) {
 				ret=nentries;
 				goto out;
 			}
-			assert(fileoffset <= rel.fileoffset && extlen+extent_offset >= rel.extent+rel.len && rel.extent >= extent_offset);
 			if (!nentries) {
 				ret=-ENOENT;
 				goto out;
 			}
-			if ((ret=callback(fd, src_fd, &rel, physextent, extlen, private)))
-				goto out;
+			for (int64_t i=0; i<nentries; i++) {
+				assert(fileoffset <= rels[i].fileoffset && extlen+extent_offset >= rels[i].extent+rels[i].len && rels[i].extent >= extent_offset);
+				if ((ret=callback(fd, src_fd, &rels[i], physextent, extlen, private)))
+					goto out;
+			}
 
 			close(fd);
 			fd=-1;
@@ -194,7 +208,6 @@ static int64_t link_to_srcfile_cb(int fd, int src_fd, relextent_t* rel, uint64_t
 	assert(mydata->type & (DEDUP_LINKTYPE_CORONA|DEDUP_LINKTYPE_CONTENT));
 	if (!(mydata->type & DEDUP_LINKTYPE_CONTENT)) {
 		if (rel->extent < mydata->logical) {
-			assert(rel->extent+rel->len > mydata->logical);
 			ret=copy_no_overwrite(fd, src_fd, rel->fileoffset, rel->extent, mydata->logical-rel->extent, mydata->src_map, mydata->type & DEDUP_LINKTYPE_COPY);
 			if (0>ret) return ret;
 		}

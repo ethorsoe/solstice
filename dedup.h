@@ -25,6 +25,9 @@
 # ifndef DEDUP_DEBUG_MAX_FILEOFFSET
 #  define DEDUP_DEBUG_MAX_FILEOFFSET 1024ULL*1024ULL*MEBI
 # endif
+# ifndef DEDUP_DEBUG_MAX_COUNT
+#  define DEDUP_DEBUG_MAX_COUNT 1000
+# endif
 #endif
 
 static inline void DEDUP_ASSERT_INODE(uint64_t inode) {
@@ -57,6 +60,14 @@ static inline void DEDUP_ASSERT_FILEOFFSET(uint64_t fileoffset) {
 	assert(max >= fileoffset);
 #endif
 	assert(0==fileoffset%BLOCKSIZE);
+}
+
+static inline void DEDUP_ASSERT_COUNT(uint64_t count) {
+#ifdef DEDUP_DEBUG_MAX_FILEOFFSET
+	uint64_t max=(DEDUP_DEBUG_MAX_COUNT);
+	assert(max >= count);
+#endif
+	assert(count);
 }
 
 static inline void DEDUP_ASSERT_STATIC_FS(int assertion) {
