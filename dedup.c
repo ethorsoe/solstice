@@ -133,7 +133,7 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 			}
 			for (int64_t i=0; i<nentries; i++) {
 				assert(fileoffset <= rels[i].fileoffset && extlen+extent_offset >= rels[i].extent+rels[i].len && rels[i].extent >= extent_offset);
-				if ((ret=callback(fd, src_fd, &rels[i], physextent, extlen, private)))
+				if ((ret=callback(fd, src_fd, &rels[i], extent_offset, extlen, private)))
 					goto out;
 			}
 
