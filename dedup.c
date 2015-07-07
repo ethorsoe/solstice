@@ -62,6 +62,9 @@ static int64_t get_extent_ref_info(int fd, uint64_t fileoffset, uint64_t extent,
 			rels[nfound].extent=map->fm_extents[i].fe_physical;
 			rels[nfound].fileoffset=map->fm_extents[i].fe_logical;
 			rels[nfound++].len=MIN(map->fm_extents[i].fe_length, extlen - (map->fm_extents[i].fe_physical-extent));
+			if (nelem == nfound)
+				return nfound;
+			assert(nelem > nfound);
 		}
 		cur_offset=map->fm_extents[nextents-1].fe_logical+map->fm_extents[nextents-1].fe_length;
 	} while(0 < nextents && cur_offset < fileoffset+expected);
