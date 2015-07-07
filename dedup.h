@@ -10,6 +10,8 @@
 
 #define DEDUP_SPECIAL_OFFSET_ZEROES (-1ULL)
 
+#define DEDUP_MAX_EXTLEN 0x40000000ULL
+
 #include <assert.h>
 
 #ifdef DEDUP_DEBUG_REASONABLE
@@ -58,6 +60,14 @@ static inline void DEDUP_ASSERT_FILEOFFSET(uint64_t fileoffset) {
 #ifdef DEDUP_DEBUG_MAX_FILEOFFSET
 	uint64_t max=(DEDUP_DEBUG_MAX_FILEOFFSET);
 	assert(max >= fileoffset);
+#endif
+	assert(0==fileoffset%BLOCKSIZE);
+}
+
+static inline void DEDUP_ASSERT_RELATIVE_FILEOFFSET(uint64_t fileoffset) {
+#ifdef DEDUP_DEBUG_MAX_FILEOFFSET
+	uint64_t max=(DEDUP_DEBUG_MAX_FILEOFFSET);
+	assert(max >= fileoffset || max >= (fileoffset+DEDUP_MAX_EXTLEN));
 #endif
 	assert(0==fileoffset%BLOCKSIZE);
 }

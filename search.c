@@ -79,7 +79,7 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 	if (BTRFS_EXTENT_DATA_REF_KEY == sh->type){
 			assert(0<my_private->metaoffset && my_private->extoffs[my_private->metaoffset-1] == sh->objectid);
 			struct btrfs_extent_data_ref *eref=data;
-			DEDUP_ASSERT_FILEOFFSET(eref->offset);
+			DEDUP_ASSERT_RELATIVE_FILEOFFSET(eref->offset);
 			DEDUP_ASSERT_INODE(eref->objectid);
 			DEDUP_ASSERT_ROOT(eref->root);
 			DEDUP_ASSERT_COUNT(eref->count);
@@ -115,7 +115,7 @@ static int search_extsum_cb(void *data, struct btrfs_ioctl_search_header *sh, vo
 				return 0;
 			}
 
-			DEDUP_ASSERT_FILEOFFSET(eref->offset);
+			DEDUP_ASSERT_RELATIVE_FILEOFFSET(eref->offset);
 			DEDUP_ASSERT_INODE(eref->objectid);
 			DEDUP_ASSERT_ROOT(eref->root);
 			DEDUP_ASSERT_COUNT(eref->count);

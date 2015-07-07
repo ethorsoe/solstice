@@ -64,7 +64,7 @@ static int64_t get_extent_ref_info(int fd, uint64_t fileoffset, uint64_t extent,
 			rels[nfound++].len=MIN(map->fm_extents[i].fe_length, extlen - (map->fm_extents[i].fe_physical-extent));
 		}
 		cur_offset=map->fm_extents[nextents-1].fe_logical+map->fm_extents[nextents-1].fe_length;
-	} while(0 < nextents && cur_offset < fileoffset+extlen);
+	} while(0 < nextents && cur_offset < fileoffset+expected);
 
 	return nfound;
 }
@@ -106,6 +106,11 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 		for (uint64_t refiter=extinds[physextent]+1; refiter < extinds[physextent+1]; refiter+=nextstep) {
 			uint64_t inode=extsums[refiter];
 			uint64_t fileoffset=extsums[refiter+1];
+			uint64_t cut_extlen=extlen;
+			if (extlen+fileoffset < fileoffset) {
+				cut_extlen+=fileoffset;
+				fileoffset=0;
+			}
 			uint64_t root=extsums[refiter+2];
 			uint64_t refcount=extsums[refiter+3];
 			DEDUP_ASSERT_ROOT(root);
@@ -121,7 +126,7 @@ static int iterate_extent_range(int atfd, uint64_t offset, uint64_t len, int src
 
 			assert(1000 >= refcount);
 			relextent_t rels[1000];
-			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, extlen, rels, refcount);
+			int64_t nentries=get_extent_ref_info(fd, fileoffset, extent_offset, extlen, cut_extlen, rels, refcount);
 			if (0>nentries) {
 				ret=nentries;
 				goto out;
